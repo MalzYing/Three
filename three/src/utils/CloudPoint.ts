@@ -16,21 +16,13 @@ class CloudPoint {
   private clock;
   private pointCloud;
 
-  constructor(domID: string, source: string,pointsColor:number) {
+  constructor(domID: string, source: string, pointsColor?: number) {
     fetch(source)
       .then((response) => {
         response.text().then((text) => {
           // 获取文件内容，转为数组
           const lines = text.split("\r\n");
-          let points: Points[] = [];
-          lines.forEach((element) => {
-            element.match(/^\d/) &&
-              points.push({
-                x: parseFloat(element.split(" ")[0]),
-                y: parseFloat(element.split(" ")[1]),
-                z: parseFloat(element.split(" ")[2]),
-              });
-          });
+
           // this.clock = new THREE.Clock();
           // 渲染数据
           // 获取要渲染的Dom
@@ -68,27 +60,83 @@ class CloudPoint {
           this.controls.enableDamping = true;
           // 监听鼠标、键盘事件
           this.controls.addEventListener("change", this.render);
+          
+          // 几何体与材质
           const geometry = new THREE.BufferGeometry();
-          // 要将数据转化成的格式，相当于把对象数组一维化
-          const positions = new Float32Array(points.length * 3);
-          points.forEach((point, i) => {
-            positions[i * 3] = point.x;
-            positions[i * 3 + 1] = point.y;
-            positions[i * 3 + 2] = point.z;
+          const material = new THREE.PointsMaterial({ size: 0.005 });
+          // 这里是先将每行的点数据化成对象再加入数组，后续发现没必要
+          // lines.forEach((element) => {
+          //   element.match(/^\d/) &&
+          //     points.push({
+          //       x: parseFloat(element.split(" ")[0]),
+          //       y: parseFloat(element.split(" ")[1]),
+          //       z: parseFloat(element.split(" ")[2]),
+          //     });
+          // });
+          // const positions = new Float32Array(points.length * 3);
+          // let points: Points[] = [];
+          // points.forEach((point, i) => {
+          //   positions[i * 3] = point.x;
+          //   positions[i * 3 + 1] = point.y;
+          //   positions[i * 3 + 2] = point.z;
+          // });
+
+          // 先判断存不存在color列
+          let hasRGB = false;
+          for (let i = 0; i <= 20; i++) {
+            if (lines[i].includes("FIELDS") && lines[i].includes("rgb")) {
+              hasRGB = true;
+              break;
+            }
+          }
+          //这两个要添加的数组决定了图形的显示
+          const positions: number[] = [];
+          const colors: number[] = [];
+          lines.forEach((element) => {
+            if (element.match(/^\d/)) {
+              positions.push(
+                parseFloat(element.split(" ")[0]),
+                parseFloat(element.split(" ")[1]),
+                parseFloat(element.split(" ")[2])
+              );
+              if (hasRGB) {
+                const float = parseFloat(element.split(" ")[3]);
+                let rgb = float;
+                // treat float values as int
+                // 四字节数组，每一个数字都是用32位二进制表示
+                const farr = new Float32Array(1);
+                farr[0] = float;
+                // 也就是说，完全可以把Float32Array直接转化成Int32Array,理论上来说，短的转长的也是不丢精度的
+                rgb = new Int32Array(farr.buffer)[0];
+                // 就不研究算法原理了,总之这样之后就得到了color一维数组
+                const r = (rgb >> 16) & 0x0000ff;
+                const g = (rgb >> 8) & 0x0000ff;
+                const b = (rgb >> 0) & 0x0000ff;
+                colors.push(r / 255, g / 255, b / 255);
+              }
+            }
           });
-          // 这里就是添加点云数据的关键一步
+          // 如果是float数组要用Float32Buffer，否则会报无法解析的错误
           geometry.setAttribute(
             "position",
-            new THREE.BufferAttribute(positions, 3)
+            new THREE.Float32BufferAttribute(positions, 3)
           );
-          const material = new THREE.PointsMaterial({ color: pointsColor });
+          if (colors.length > 0 && !pointsColor){
+            geometry.setAttribute(
+              "color",
+              new THREE.Float32BufferAttribute(colors, 3)
+            );
+            material.vertexColors = true;
+          }
+          else material.color=new THREE.Color(pointsColor)
+      
+          // 决定每个点加颜色一定要写明这个属性
+       
           // 生成的实体
           this.pointCloud = new THREE.Points(geometry, material);
-
           this.pointCloud.geometry.rotateX(0.5 * Math.PI);
           // 旋转模型，可调,默认的是和鼠标反着转的
           this.scene.add(this.pointCloud);
-
           // keepSceneCenter，这个保证一开始展示时物体是在场景中的
           const middle = new THREE.Vector3();
           this.pointCloud.geometry.computeBoundingBox();
